@@ -1,0 +1,336 @@
+# Population Health and Economic Effects of Severe Weather Events in the United States, 1950-2011
+
+## Synopsis
+Storms and other severe weather events can cause both public health and economic problems for communities and municipalities. Many severe events can result in fatalities, injuries, and property damage, and preventing such outcomes to the extent possible is a key concern.
+
+This project involves exploring the U.S. National Oceanic and Atmospheric Administration's (NOAA) storm database. This database tracks characteristics of major storms and weather events in the United States, including when and where they occur, as well as estimates of any fatalities, injuries, and property damage.
+
+The goal of this project is to explore the NOAA Storm Database and answer some basic questions about severe weather events: 
+
+- Across the United States, which types of events are most harmful with respect to population health?
+- Across the United States, which types of events have the greatest economic consequences?
+
+## Data Processing
+
+Before processing the data, first set the working directry and load the required libraries.
+
+```r
+setwd("~/Documents/Coursera/Assignments/RepData_PeerAssessment2")
+
+library(lubridate)
+library(stringr)
+library(quantmod)
+```
+
+```
+## Loading required package: xts
+## Loading required package: zoo
+## 
+## Attaching package: 'zoo'
+## 
+## The following objects are masked from 'package:base':
+## 
+##     as.Date, as.Date.numeric
+## 
+## Loading required package: TTR
+## Version 0.4-0 included new data defaults. See ?getSymbols.
+```
+
+```r
+library(reshape2)
+library(lattice)
+library(R.utils)
+```
+
+```
+## Loading required package: R.oo
+## Loading required package: R.methodsS3
+## R.methodsS3 v1.6.1 (2014-01-04) successfully loaded. See ?R.methodsS3 for help.
+## R.oo v1.18.0 (2014-02-22) successfully loaded. See ?R.oo for help.
+## 
+## Attaching package: 'R.oo'
+## 
+## The following objects are masked from 'package:methods':
+## 
+##     getClasses, getMethods
+## 
+## The following objects are masked from 'package:base':
+## 
+##     attach, detach, gc, load, save
+## 
+## R.utils v1.34.0 (2014-10-07) successfully loaded. See ?R.utils for help.
+## 
+## Attaching package: 'R.utils'
+## 
+## The following object is masked from 'package:utils':
+## 
+##     timestamp
+## 
+## The following objects are masked from 'package:base':
+## 
+##     cat, commandArgs, getOption, inherits, isOpen, parse, warnings
+```
+
+The data for this assignment come in the form of a comma-separated-value file compressed via the bzip2 algorithm to reduce its size. 
+
+Download and uncompress the data file.
+
+```r
+fileUrl <- "https://d396qusza40orc.cloudfront.net/repdata/data/StormData.csv.bz2"
+download.file(fileUrl, destfile = "StormData.csv.bz2.zip", method = "curl")
+bunzip2("StormData.csv.bz2.zip", "repdata_data_StormData.csv")
+```
+
+Record when the data file was downloaded.
+
+```r
+dateDownloaded <- date()
+dateDownloaded
+```
+
+```
+## [1] "Sat Jan 17 19:11:25 2015"
+```
+
+Load the .csv file into R.
+
+```r
+df <- read.csv('repdata_data_StormData.csv', sep = ',', header = TRUE, nrows = 1000000, 
+               comment.char = "", stringsAsFactors = FALSE)
+```
+
+Subset the data file to include only the variables of interest, and perform some minor cleaning. 
+
+```r
+# Keep required variables
+# Date, Event Type, Fatalities, Injuries, Property Damage, Crop Damage, Damage Multipliers 
+df <- df[c(2, 8, 23:28)]
+
+# Convert column names to lower case
+colnames(df) <- tolower(colnames(df))
+
+# Convert date to POSIXct format
+df$bgn_date <- mdy_hms(df$bgn_date)
+
+# Compute year variable
+df$year <- year(df$bgn_date)
+```
+
+Print the number of records in the file.
+
+```r
+nrow(df)
+```
+
+```
+## [1] 902297
+```
+
+The events in the database start in the year 1950 and end in November 2011. In the earlier years of the database there are generally fewer events recorded, most likely due to a lack of good records. More recent years should be considered more complete.
+
+Documentation of the database can be found at:
+
+- [National Weather Service Storm Data Documentation][1]
+- [National Climatic Data Center Storm Events FAQ][2]
+
+[1]: https://d396qusza40orc.cloudfront.net/repdata/peer2_doc/pd01016005curr.pdf "Documentation"
+[2]: https://d396qusza40orc.cloudfront.net/repdata/peer2_doc/NCDC%20Storm%20Events-FAQ%20Page.pdf "FAQ"
+
+According to the documentation, 48 types of Storm Data Events are recorded in the database, ranging from Astronomical Low Tide to Winter Weather. However, there are 985 unique Storm Data Event values in the data file. This is a result of inconsistent data entry over the years due to alternate spellings, typos and abbreviations (e.g., "COASTAL FLOODING" vs. "CSTL FLOOD"), upper vs. sentence case (e.g., "Coastal Flooding" vs. "COASTAL FLOODING", multiple terms (e.g., "COASTAL FLOODING/EROSION"), and alternate terms (e.g., "ABNORMALLY DRY" vs. "DROUGHT").
+
+The Storm Data Event types were cleaned using regular expressions to perform partial pattern matching after converting all event types to upper case and removing white space. In the case of multiple terms, the first term was given priority unless it was not one of the 48 Storm Data Events in the documentation.
+
+```r
+# Strip whitespace and convert to upper case
+df$evtype.r <- str_trim(df$evtype)
+df$evtype.r <- toupper(df$evtype.r)
+
+# Set event types with "Summary" or "Metro" to NA, as these are database errors 
+df$evtype.r <- gsub("^SUMMARY.*|^METRO.*", NA, df$evtype.r)
+
+# First pass: process correct spelling, typos, abbreviations, first terms in a list and alternate terms 
+df$evtype.r <- gsub("ASTRONOMICAL LOW TIDE", "Astronomical Low Tide", df$evtype.r)
+df$evtype.r <- gsub("AVALANCH?E", "Avalanche", df$evtype.r)
+df$evtype.r <- gsub("^BLIZZARD.*", "Blizzard", df$evtype.r)
+df$evtype.r <- gsub("^C(OA)?STA?L.*|.*C(OA)?STA?L FLOOD.*$", "Coastal Flooding", df$evtype.r)
+df$evtype.r <- gsub("^COLD.*", "Cold/Wind Chill", df$evtype.r)
+df$evtype.r <- gsub("DEBRIS FLOW", "Debris Flow", df$evtype.r)
+df$evtype.r <- gsub("^DENSE FOG.*|.*DENSE FOG$|^[FV]OG.*", "Dense Fog", df$evtype.r)
+df$evtype.r <- gsub("DENSE SMOKE", "Dense Smoke", df$evtype.r)
+df$evtype.r <- gsub("^DROUGHT|^DRY [CHNPSW].*|^DRY(NESS)?$|^UN.*DRY|^AB.*DRY|^EX.*DRY|VERY DRY", "Drought", df$evtype.r)
+df$evtype.r <- gsub("^DUST DEV[IE]L.*", "Dust Devil", df$evtype.r)
+df$evtype.r <- gsub("^DUST ?STORM.*", "Dust Storm", df$evtype.r)
+df$evtype.r <- gsub("^EX.*HEAT.*|.*EX.*HEAT$|^HOT.*|^RE.*[HW].*|^UN.*[WH].*|^PR.*WA.*|^VERY WARM", "Excessive Heat", df$evtype.r)
+df$evtype.r <- gsub("^EX.*COLD.*|^EX.*WIND ?CH.*|.*EX.*WIND CH.*$|^BI.*|^[RS]E.*CO.*|^PR.*CO.*|^UN.*CO.*|^LOW [TW].*", "Extreme Cold/Wind Chill", df$evtype.r)
+df$evtype.r <- gsub("^FLASH FLOOO?D.*", "Flash Flood", df$evtype.r)
+df$evtype.r <- gsub("^FLOOD.*|^URBAN.*", "Flood", df$evtype.r)
+df$evtype.r <- gsub("^FROST.*|^FREEZ.*", "Frost/Freeze", df$evtype.r)
+df$evtype.r <- gsub("^FUNNEL.*|.*FUNNEL CLOUD$", "Funnel Cloud", df$evtype.r)
+df$evtype.r <- gsub("FREEZING FOG", "Freezing Fog", df$evtype.r)
+df$evtype.r <- gsub("^HAIL.*|.*HAIL$", "Hail", df$evtype.r)
+df$evtype.r <- gsub("^HEAT.*", "Heat", df$evtype.r)
+df$evtype.r <- gsub("^HEAVY RAIN.*", "Heavy Rain", df$evtype.r)
+df$evtype.r <- gsub("^HEAVY.*SNOW.*|^SNOW.*", "Heavy Snow", df$evtype.r)
+df$evtype.r <- gsub("^H[IE].*SURF.*|^H[IE].*SEAS.*|HAZARDOUS SURF|^H[IE].*SWELLS.*", "High Surf", df$evtype.r)
+df$evtype.r <- gsub("^HIGH WIND.*", "High Wind", df$evtype.r)
+df$evtype.r <- gsub("^HURRICANE.*|^TYPHOON", "Hurricane (Typhoon)", df$evtype.r)
+df$evtype.r <- gsub("^IC.*", "Ice Storm", df$evtype.r)
+df$evtype.r <- gsub("^LAKE.?EFFECT SNOW|.*LAKE SNOW$", "Lake-Effect Snow", df$evtype.r)
+df$evtype.r <- gsub("^LAKE(.*)?FLOOD", "Lakeshore Flood", df$evtype.r)
+df$evtype.r <- gsub("^LIG[HN]TN?ING.*", "Lightning", df$evtype.r)
+df$evtype.r <- gsub("MARINE HAIL", "Marine Hail", df$evtype.r)
+df$evtype.r <- gsub("MARINE HIGH WIND", "Marine High Wind", df$evtype.r)
+df$evtype.r <- gsub("MARINE STRONG WIND", "Marine Strong Wind", df$evtype.r)
+df$evtype.r <- gsub("MARINE T(HUNDER)?ST(OR)?M WIND", "Marine Thunderstorm", df$evtype.r)
+df$evtype.r <- gsub("^RIP CURRENT.*", "Rip Current", df$evtype.r)
+df$evtype.r <- gsub("SEICHE", "Seiche", df$evtype.r)
+df$evtype.r <- gsub("^SLEET.*", "Sleet", df$evtype.r)
+df$evtype.r <- gsub("^STORM SURGE.*", "Storm Surge/Tide", df$evtype.r)
+df$evtype.r <- gsub("^STRONG WIND.*", "Strong Wind", df$evtype.r)
+df$evtype.r <- gsub("^TH?UN?D?EE?R?E?[ST]?[TS][OR][RO]M.*|^THUNDERSTORM ?W.*|.*THUNDERSTORM WIND.*$", "Thunderstorm Wind", df$evtype.r)
+df$evtype.r <- gsub("^TORN[AD][DA]O.*", "Tornado", df$evtype.r)
+df$evtype.r <- gsub("TROPICAL DEPRESSION", "Tropical Depression", df$evtype.r)
+df$evtype.r <- gsub("^TROPICAL STORM.*", "Tropical Storm", df$evtype.r)
+df$evtype.r <- gsub("TSUNAMI", "Tsunami", df$evtype.r)
+df$evtype.r <- gsub("^VOLCANIC.*", "Volcanic Ash", df$evtype.r)
+df$evtype.r <- gsub("^WAY?TER ?SPOUT.*", "Waterspout", df$evtype.r)
+df$evtype.r <- gsub("^WILD.*?FIRE(S.*)?|.*FIRE.*$", "Wildfire", df$evtype.r)
+df$evtype.r <- gsub("^WINTER STORM.*", "Winter Storm", df$evtype.r)
+df$evtype.r <- gsub("^WINTER WEATHER.*|^WINTE?RY? MIX", "Winter Weather", df$evtype.r)
+
+# Second pass: keywords at the end of the string and anything else missed during the first pass
+df$evtype.r <- gsub(".*BLIZZARD$", "Blizzard", df$evtype.r)
+df$evtype.r <- gsub("^WIND CHILL.*|.*WIND CHILL$", "Cold/Wind Chill", df$evtype.r)
+df$evtype.r <- gsub("^HIGH T.*", "Excessive Heat", df$evtype.r)
+df$evtype.r <- gsub("^HYP[OE].*", "Extreme Cold/Wind Chill", df$evtype.r)
+df$evtype.r <- gsub(".*FLASH FLOOD$", "Flash Flood", df$evtype.r)
+df$evtype.r <- gsub(".*FLOOD.*$|^SM(AL)?L.*", "Flood", df$evtype.r)
+df$evtype.r <- gsub("^RAIN.*|.*RAIN.*$", "Heavy Rain", df$evtype.r)
+df$evtype.r <- gsub(".*FLOYD$", "Hurricane (Typhoon)", df$evtype.r)
+df$evtype.r <- gsub(".*ICE STORM$", "Ice Storm", df$evtype.r)
+df$evtype.r <- gsub("^[MO].*SNOW.*|.*SNOW$", "Heavy Snow", df$evtype.r)
+df$evtype.r <- gsub("^SE.*THUNDERSTORM.*|^GUST.*|^TSTM.*", "Thunderstorm Wind", df$evtype.r)
+```
+
+At the end of the cleaning process, 125 terms were set to missing because they did not provide enough detail to allow them to be collapsed into one of the existing Event Types with a high degree of confidence. 
+
+```r
+# Convert all remaining terms in ALL CAPS to missing
+df$evtype.r <- gsub("^.[A-Z]", NA, df$evtype.r)
+```
+
+In the raw data file, damage amounts are recorded across two variables: a numeric variable indicating the value (e.g., 25) and a damage exponent indicating the unit (e.g., K for thousand). To prepare the damage variables for analysis, the exponent variables were converted to numeric values.
+
+```r
+df$propdmgexp <- toupper(df$propdmgexp)
+df$pmult <- 0
+df$pmult[df$propdmgexp == "H"] <- 10^2
+df$pmult[df$propdmgexp == "K"] <- 10^3
+df$pmult[df$propdmgexp == "M"] <- 10^6
+df$pmult[df$propdmgexp == "B"] <- 10^9
+
+df$cropdmgexp <- toupper(df$cropdmgexp)
+df$cmult <- 0
+df$cmult[df$cropdmgexp == "K"] <- 10^3
+df$cmult[df$cropdmgexp == "M"] <- 10^6
+```
+
+In order to [adjust historical dollar values for inflation](http://en.wikipedia.org/wiki/Constant_dollars), a conversion factor was created using the [Consumer Price Index](http://research.stlouisfed.org/fred2/series/CPIAUCSL) (CPI) from US Federal Reserve Economic Data to convert the damage amounts to 2011 dollars.
+
+```r
+suppressWarnings(getSymbols("CPIAUCSL", src = 'FRED'))
+```
+
+```
+##     As of 0.4-0, 'getSymbols' uses env=parent.frame() and
+##  auto.assign=TRUE by default.
+## 
+##  This  behavior  will be  phased out in 0.5-0  when the call  will
+##  default to use auto.assign=FALSE. getOption("getSymbols.env") and 
+##  getOptions("getSymbols.auto.assign") are now checked for alternate defaults
+## 
+##  This message is shown once per session and may be disabled by setting 
+##  options("getSymbols.warning4.0"=FALSE). See ?getSymbol for more details
+```
+
+```
+## [1] "CPIAUCSL"
+```
+
+```r
+cpi <- apply.yearly(CPIAUCSL, mean)
+conv <- 1 / cpi * as.numeric(cpi["2011"])
+x <- data.frame(conv[4:65, ])
+year <- c(1950:2011)
+conv <- cbind(year, x)
+row.names(conv) <- c(1:62)
+head(conv)
+```
+
+```
+##   year CPIAUCSL
+## 1 1950 9.347820
+## 2 1951 8.660110
+## 3 1952 8.466697
+## 4 1953 8.402911
+## 5 1954 8.372675
+## 6 1955 8.394287
+```
+
+Create new property and crop damage amount variables using the multipliers and conversion factors.
+
+```r
+df$conv <- 0
+for (i in 1:nrow(conv)) {
+    df$conv[df$year == conv$year[i]] <- conv$CPIAUCSL[i]
+}
+df$property <- df$propdmg * df$pmult * df$conv
+df$crop <- df$cropdmg * df$cmult * df$conv
+```
+
+Finally, create aggregate data files for plotting.
+
+```r
+df.injury <- melt(df[, c(3, 4, 10)], id = "evtype.r")
+df.injury <- dcast(df.injury, evtype.r ~ variable, sum)
+df.injury <- df.injury[2:46, ]
+df.i2 <- melt(df.injury, id = "evtype.r")
+df.i2$variable <- gsub("injuries", "Injuries", df.i2$variable)
+df.i2$variable <- gsub("fatalities", "Fatalities", df.i2$variable)
+
+df.damage <- melt(df[, c(10, 14, 15)], id = "evtype.r")
+df.damage <- dcast(df.damage, evtype.r ~ variable, sum)
+df.damage <- df.damage[2:46, ]
+df.d2 <- melt(df.damage, id = "evtype.r")
+df.d2$variable <- gsub("property", "Property", df.d2$variable)
+df.d2$variable <- gsub("crop", "Crop", df.d2$variable)
+```
+
+### Results
+
+Figure 1 shows the total number of injuries and fatalities caused by each severe weather event. The number of injuries/fatalities is plotted on a logarithmic scale to make the figure easier to interpret.
+
+```r
+with(df.i2, dotplot(reorder(evtype.r, value) ~ value, group = variable, 
+                    scales = list(x = list(log = 10)), auto.key = list(columns = 2),
+                    xlab = "Number of Injuries/Fatalities (Logarithmic scale)", 
+                    main = "Figure 1: Population Health Effects Caused By Severe Weather Events, 1950-2011"))
+```
+
+![](StormData_files/figure-html/population_health_plot-1.png) 
+
+Tornados are by far the most harmful severe weather event to population health, with more than 90,000 injuries and over 5,000 fatalities reported from 1950-2011. As shown in Figure 1, the number of injuries caused by tornadoes is an order of magnitude higher than any other severe weather event.
+
+Figure 2 shows the total value of property and crop damage caused by each severe weather event, in 2011 inflation-adjusted dollars. Damage is plotted on a logarithmic scale to make the figure easier to interpret.
+
+```r
+with(df.d2, dotplot(reorder(evtype.r, value) ~ value, groups = variable, 
+                    scales = list(x = list(log = 10)), auto.key = list(columns = 2),
+                    xlab = "2011 Inflation-Adjusted Dollars (Logarithmic scale)",
+                    main = "Figure 2: Economic Damage Caused By Severe Weather Events, 1950-2011"))
+```
+
+![](StormData_files/figure-html/economic_damage_plot-1.png) 
+
+Floods, tornadoes and hurricanes are the severe weather events with the greatest economic consequence to property, with each causing over $100 billion in property damage from 1950-2011. Drought has the greatest economic consequences to crops, with over $15 billion in crop damage from 1950-2011. Drought is one of the few severe weather events that causes more damage to crops than to property.
+
